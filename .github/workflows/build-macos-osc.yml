@@ -1,0 +1,65 @@
+name: Build macOS binaries
+
+# Auto-builds macOS x86_64 and aarch64 binaries on push to this branch
+# so reviewers without a Rust toolchain can validate the OSC 9/777
+# patch. Artifacts are uploaded to the run summary; download from the
+# Actions tab.
+
+on:
+  push:
+    branches:
+      - claude/osc-notification-passthrough-WMI63
+  workflow_dispatch:
+
+jobs:
+  build-macos:
+    name: Build (${{ matrix.target }})
+    runs-on: macos-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - target: aarch64-apple-darwin
+            label: macos-aarch64-apple-silicon
+          - target: x86_64-apple-darwin
+            label: macos-x86_64-intel
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Install Protoc
+        uses: arduino/setup-protoc@v3
+        with:
+          repo-token: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Install Rust
+        uses: actions-rust-lang/setup-rust-toolchain@v1
+        with:
+          target: ${{ matrix.target }}
+          cache: false
+          rustflags: ""
+
+      # The wasm plugins are already committed in zellij-utils/assets/plugins/
+      # so we skip the wasm build and go straight to the native binary.
+      - name: Build release binary
+        run: cargo build --release --target ${{ matrix.target }} --bin zellij
+
+      - name: Strip + package
+        run: |
+          set -euxo pipefail
+          BIN_PATH="target/${{ matrix.target }}/release/zellij"
+          OUT_NAME="zellij-osc-9-777-${{ matrix.label }}"
+          mkdir -p out
+          cp "$BIN_PATH" "out/$OUT_NAME"
+          strip "out/$OUT_NAME"
+          tar czf "out/${OUT_NAME}.tar.gz" -C out "$OUT_NAME"
+          (cd out && shasum -a 256 "${OUT_NAME}" "${OUT_NAME}.tar.gz" > SHA256SUMS)
+          ls -lh out/
+
+      - name: Upload artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: zellij-osc-9-777-${{ matrix.label }}
+          path: out/
+          if-no-files-found: error
+          retention-days: 30
