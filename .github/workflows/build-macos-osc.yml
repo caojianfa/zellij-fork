@@ -1,15 +1,22 @@
 name: Build macOS binaries
 
-# Auto-builds macOS x86_64 and aarch64 binaries on push to this branch
-# so reviewers without a Rust toolchain can validate the OSC 9/777
-# patch. Artifacts are uploaded to the run summary; download from the
-# Actions tab.
+# Auto-builds macOS x86_64 and aarch64 binaries on push to this branch.
+# Artifacts are (a) uploaded to the run summary for logged-in viewers
+# and (b) committed back to releases/ on this branch so anyone can
+# `curl -LO` them via the GitHub raw URL — no login required.
 
 on:
   push:
     branches:
       - claude/osc-notification-passthrough-WMI63
+    paths-ignore:
+      - 'releases/**'
+      - 'VERIFY.md'
+      - 'RESEARCH.md'
   workflow_dispatch:
+
+permissions:
+  contents: write
 
 jobs:
   build-macos:
@@ -53,7 +60,6 @@ jobs:
           cp "$BIN_PATH" "out/$OUT_NAME"
           strip "out/$OUT_NAME"
           tar czf "out/${OUT_NAME}.tar.gz" -C out "$OUT_NAME"
-          (cd out && shasum -a 256 "${OUT_NAME}" "${OUT_NAME}.tar.gz" > SHA256SUMS)
           ls -lh out/
 
       - name: Upload artifact
@@ -63,3 +69,46 @@ jobs:
           path: out/
           if-no-files-found: error
           retention-days: 30
+
+  publish-binaries:
+    name: Commit binaries to branch
+    needs: build-macos
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          ref: claude/osc-notification-passthrough-WMI63
+          token: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Download all artifacts
+        uses: actions/download-artifact@v4
+        with:
+          path: downloaded-artifacts
+
+      - name: Stage binaries into releases/
+        run: |
+          set -euxo pipefail
+          mkdir -p releases
+          # Both artifacts contain the .tar.gz we want; flatten into releases/
+          find downloaded-artifacts -type f \( -name '*.tar.gz' -o -name 'zellij-osc-9-777-macos-*' \) -print0 | \
+            xargs -0 -I{} cp -f {} releases/
+          # Regenerate SHA256SUMS covering Linux + macOS artifacts together
+          (cd releases && shasum -a 256 zellij-osc-9-777-* > SHA256SUMS)
+          ls -lh releases/
+
+      - name: Commit + push
+        run: |
+          set -euxo pipefail
+          git config user.name  "zellij-osc-ci"
+          git config user.email "zellij-osc-ci@users.noreply.github.com"
+          if git diff --quiet -- releases/; then
+            echo "No changes to commit."
+            exit 0
+          fi
+          git add releases/
+          git commit -m "release: add macOS binaries (auto-built by CI)
+
+aarch64-apple-darwin (Apple Silicon) and x86_64-apple-darwin (Intel)
+release binaries built by .github/workflows/build-macos-osc.yml."
+          git push origin claude/osc-notification-passthrough-WMI63
