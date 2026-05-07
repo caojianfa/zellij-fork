@@ -107,8 +107,6 @@ jobs:
             exit 0
           fi
           git add releases/
-          git commit -m "release: add macOS binaries (auto-built by CI)
-
-aarch64-apple-darwin (Apple Silicon) and x86_64-apple-darwin (Intel)
-release binaries built by .github/workflows/build-macos-osc.yml."
+          git commit -m "release: add macOS binaries (auto-built by CI)" \
+                     -m "aarch64-apple-darwin (Apple Silicon) and x86_64-apple-darwin (Intel) release binaries built by .github/workflows/build-macos-osc.yml."
           git push origin claude/osc-notification-passthrough-WMI63
