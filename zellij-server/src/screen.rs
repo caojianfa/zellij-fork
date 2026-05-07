@@ -745,6 +745,7 @@ pub enum ScreenInstruction {
         visual_bell: bool,
         focus_follows_mouse: bool,
         mouse_click_through: bool,
+        allow_osc_passthrough: bool,
     },
     RerunCommandPane(u32, Option<NotificationEnd>), // u32 - terminal pane id
     ResizePaneWithId(ResizeStrategy, PaneId),
@@ -1416,6 +1417,7 @@ pub(crate) struct Screen {
     visual_bell: bool,
     focus_follows_mouse: bool,
     mouse_click_through: bool,
+    allow_osc_passthrough: bool,
     currently_marking_pane_group: Rc<RefCell<HashMap<ClientId, bool>>>,
     // the below are the configured values - the ones that will be set if and when the web server
     // is brought online
@@ -1544,6 +1546,7 @@ impl Screen {
         visual_bell: bool,
         focus_follows_mouse: bool,
         mouse_click_through: bool,
+        allow_osc_passthrough: bool,
         web_server_ip: IpAddr,
         web_server_port: u16,
     ) -> Self {
@@ -1602,6 +1605,7 @@ impl Screen {
             visual_bell,
             focus_follows_mouse,
             mouse_click_through,
+            allow_osc_passthrough,
             web_server_ip,
             web_server_port,
             render_blocker: RenderBlocker::new(100),
@@ -2960,6 +2964,7 @@ impl Screen {
             self.mouse_hover_effects,
             self.focus_follows_mouse,
             self.mouse_click_through,
+            self.allow_osc_passthrough,
             self.web_server_ip,
             self.web_server_port,
         );
@@ -4565,6 +4570,7 @@ impl Screen {
         visual_bell: bool,
         focus_follows_mouse: bool,
         mouse_click_through: bool,
+        allow_osc_passthrough: bool,
         client_id: ClientId,
     ) -> Result<()> {
         let should_support_arrow_fonts = !simplified_ui;
@@ -4589,6 +4595,7 @@ impl Screen {
         self.visual_bell = visual_bell;
         self.focus_follows_mouse = focus_follows_mouse;
         self.mouse_click_through = mouse_click_through;
+        self.allow_osc_passthrough = allow_osc_passthrough;
         self.default_mode_info
             .update_arrow_fonts(should_support_arrow_fonts);
         self.default_mode_info
@@ -4612,6 +4619,7 @@ impl Screen {
             tab.update_mouse_hover_effects(mouse_hover_effects);
             tab.update_focus_follows_mouse(focus_follows_mouse);
             tab.update_mouse_click_through(mouse_click_through);
+            tab.update_allow_osc_passthrough(allow_osc_passthrough);
         }
 
         // Clear hover state when disabled
@@ -5727,6 +5735,7 @@ pub(crate) fn screen_thread_main(
     let visual_bell = config_options.visual_bell.unwrap_or(true);
     let focus_follows_mouse = config_options.focus_follows_mouse.unwrap_or(false);
     let mouse_click_through = config_options.mouse_click_through.unwrap_or(false);
+    let allow_osc_passthrough = config_options.allow_osc_passthrough.unwrap_or(true);
 
     let thread_senders = bus.senders.clone();
     let mut screen = Screen::new(
@@ -5768,6 +5777,7 @@ pub(crate) fn screen_thread_main(
         visual_bell,
         focus_follows_mouse,
         mouse_click_through,
+        allow_osc_passthrough,
         web_server_ip,
         web_server_port,
     );
@@ -8827,6 +8837,7 @@ pub(crate) fn screen_thread_main(
                 visual_bell,
                 focus_follows_mouse,
                 mouse_click_through,
+                allow_osc_passthrough,
             } => {
                 screen.host_theme_dark_styling = host_theme_dark;
                 screen.host_theme_light_styling = host_theme_light;
@@ -8851,6 +8862,7 @@ pub(crate) fn screen_thread_main(
                         visual_bell,
                         focus_follows_mouse,
                         mouse_click_through,
+                        allow_osc_passthrough,
                         client_id,
                     )
                     .non_fatal();
