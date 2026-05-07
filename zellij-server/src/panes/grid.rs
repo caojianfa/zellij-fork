@@ -3776,6 +3776,54 @@ impl Perform for Grid {
                 }
             },
 
+            // OSC 9 (iTerm2 desktop notification): ESC ] 9 ; <body> ST
+            // Unidirectional, no metadata, no response. Always trigger the
+            // visual indicator (pane/tab frame flash + [!] suffix). The
+            // trailing BEL of an OSC sequence is consumed by VTE as the
+            // terminator, not dispatched as `execute(7)`, so we set
+            // ring_bell explicitly. Payload is prefixed with the OSC code
+            // so the Tab-level forwarder can disambiguate from OSC 99 /
+            // OSC 777 and skip namespacing.
+            b"9" => {
+                self.ring_bell = true;
+                if params.len() > 1 {
+                    let body = params
+                        .get(1..)
+                        .unwrap_or_default()
+                        .iter()
+                        .flat_map(|x| str::from_utf8(x))
+                        .collect::<Vec<&str>>()
+                        .join(";");
+                    if !body.is_empty() {
+                        self.pending_desktop_notifications
+                            .push((format!("9;{}", body), terminator.to_string()));
+                    }
+                }
+            },
+
+            // OSC 777 (rxvt-style desktop notification): ESC ] 777 ; notify ; <title> ; <body> ST
+            // Only the `notify` sub-command is in scope; other sub-commands
+            // are silently ignored (visual bell still fires).
+            b"777" => {
+                if params.len() >= 2 && params[1] == b"notify" {
+                    self.ring_bell = true;
+                    if params.len() >= 3 {
+                        let title = str::from_utf8(params[2]).unwrap_or("");
+                        let body = params
+                            .get(3..)
+                            .unwrap_or_default()
+                            .iter()
+                            .flat_map(|x| str::from_utf8(x))
+                            .collect::<Vec<&str>>()
+                            .join(";");
+                        self.pending_desktop_notifications.push((
+                            format!("777;notify;{};{}", title, body),
+                            terminator.to_string(),
+                        ));
+                    }
+                }
+            },
+
             _ => {
                 if self.debug {
                     log::warn!("Unhandled osc: {:?}", params);
