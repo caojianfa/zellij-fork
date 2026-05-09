@@ -13,18 +13,26 @@
 
 ## 推荐：用 Homebrew 装（macOS）
 
-仓库根目录有现成的 Formula。一行命令覆盖你 brew 装的 zellij：
+仓库根目录有现成的 Formula。**先下载到本地，再装**（modern brew 不支持直接从 URL 装 `.rb` formula）：
 
 ```bash
-brew uninstall zellij && brew install --formula https://raw.githubusercontent.com/Caojianfa/zellij-fork/claude/osc-notification-passthrough-WMI63/Formula/zellij.rb
+# 1. 卸载官方 zellij
+brew uninstall zellij
+
+# 2. 下载我们的 formula 到本地
+curl -fsSL -o /tmp/zellij-osc-patch.rb \
+  https://raw.githubusercontent.com/Caojianfa/zellij-fork/claude/osc-notification-passthrough-WMI63/Formula/zellij-osc-patch.rb
+
+# 3. 装
+brew install --formula /tmp/zellij-osc-patch.rb
 ```
 
-formula 自动选 Apple Silicon 还是 Intel binary，全自动校验 SHA256。
+formula 自动选 Apple Silicon 还是 Intel binary，全自动校验 SHA256。装出来在 brew 里登记的名字是 `zellij-osc-patch`，但**实际可执行文件叫 `zellij`**，会覆盖你 PATH 里原来的那个，所以直接 `zellij` 就是 patch 版本。
 
 **测完恢复官方 zellij：**
 
 ```bash
-brew uninstall zellij && brew install zellij
+brew uninstall zellij-osc-patch && brew install zellij
 ```
 
 如果你测试中改过 `~/.config/zellij/config.kdl`（比如加了 `allow_osc_passthrough false`），记得**先把那行删掉再跑** `brew install zellij`，不然旧版本会因为不认识这个新 KDL 字段拒绝启动。
