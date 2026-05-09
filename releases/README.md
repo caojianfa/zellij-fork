@@ -4,76 +4,96 @@
 
 ## 文件清单
 
-| 文件 | 大小 | 说明 |
+| 文件 | 大小 | 平台 |
 | --- | --- | --- |
-| `zellij-osc-9-777-linux-x86_64-musl.tar.gz` | 18 MB | release 静态二进制（Linux x86_64，musl 静态链接，已 strip） |
-| `SHA256SUMS` | 209 B | 解压前后两个文件的 SHA256 校验和 |
+| `zellij-osc-9-777-macos-aarch64-apple-silicon.tar.gz` | 15 MB | **macOS Apple Silicon** (M1/M2/M3+) |
+| `zellij-osc-9-777-macos-x86_64-intel.tar.gz` | 15 MB | **macOS Intel** |
+| `zellij-osc-9-777-linux-x86_64-musl.tar.gz` | 18 MB | **Linux x86_64** (musl 静态) |
+| `SHA256SUMS` | 548 B | 全部文件的 SHA256 校验和 |
 
-## 平台
+## 推荐：用 Homebrew 装（macOS）
 
-- **Linux x86_64**：直接用，musl 静态链接，不依赖系统 glibc 版本，从 Ubuntu 20.04 到最新都能跑。
-- **macOS**：本仓库目前不提供 macOS 二进制（构建环境是 Linux）。如果需要，自己 clone 仓库并 `cargo install --path . --release` 编译。
-- **Windows**：zellij 主线本来就不官方支持 Windows，本 patch 也不例外。
+仓库根目录有现成的 Formula。一行命令覆盖你 brew 装的 zellij：
 
-## 下载步骤
+```bash
+brew uninstall zellij && brew install --formula https://raw.githubusercontent.com/Caojianfa/zellij-fork/claude/osc-notification-passthrough-WMI63/Formula/zellij.rb
+```
 
-### 浏览器下载
+formula 自动选 Apple Silicon 还是 Intel binary，全自动校验 SHA256。
 
-1. 打开 https://github.com/Caojianfa/zellij-fork/blob/claude/osc-notification-passthrough-WMI63/releases/zellij-osc-9-777-linux-x86_64-musl.tar.gz
-2. 点页面右上的「Download raw file」按钮
-3. 保存到本地任意位置
+**测完恢复官方 zellij：**
 
-### 命令行下载（推荐）
+```bash
+brew uninstall zellij && brew install zellij
+```
+
+如果你测试中改过 `~/.config/zellij/config.kdl`（比如加了 `allow_osc_passthrough false`），记得**先把那行删掉再跑** `brew install zellij`，不然旧版本会因为不认识这个新 KDL 字段拒绝启动。
+
+## 替代方案：直接下载二进制
+
+### macOS Apple Silicon（M1/M2/M3+）
+
+```bash
+curl -LO https://github.com/Caojianfa/zellij-fork/raw/claude/osc-notification-passthrough-WMI63/releases/zellij-osc-9-777-macos-aarch64-apple-silicon.tar.gz
+tar xzf zellij-osc-9-777-macos-aarch64-apple-silicon.tar.gz
+chmod +x zellij-osc-9-777-macos-aarch64-apple-silicon
+./zellij-osc-9-777-macos-aarch64-apple-silicon  # 直接运行，或 mv 到 PATH
+```
+
+> macOS 第一次跑会被 Gatekeeper 拦（因为没有签名）。绕过办法：
+> ```bash
+> xattr -d com.apple.quarantine zellij-osc-9-777-macos-aarch64-apple-silicon
+> ```
+> 然后再运行。
+
+### macOS Intel
+
+```bash
+curl -LO https://github.com/Caojianfa/zellij-fork/raw/claude/osc-notification-passthrough-WMI63/releases/zellij-osc-9-777-macos-x86_64-intel.tar.gz
+tar xzf zellij-osc-9-777-macos-x86_64-intel.tar.gz
+chmod +x zellij-osc-9-777-macos-x86_64-intel
+xattr -d com.apple.quarantine zellij-osc-9-777-macos-x86_64-intel  # 绕过 Gatekeeper
+./zellij-osc-9-777-macos-x86_64-intel
+```
+
+### Linux x86_64
 
 ```bash
 curl -LO https://github.com/Caojianfa/zellij-fork/raw/claude/osc-notification-passthrough-WMI63/releases/zellij-osc-9-777-linux-x86_64-musl.tar.gz
-curl -LO https://github.com/Caojianfa/zellij-fork/raw/claude/osc-notification-passthrough-WMI63/releases/SHA256SUMS
+tar xzf zellij-osc-9-777-linux-x86_64-musl.tar.gz
+chmod +x zellij-osc-9-777-linux-x86_64-musl
+./zellij-osc-9-777-linux-x86_64-musl
 ```
 
 ## 校验
 
 ```bash
-sha256sum -c SHA256SUMS
+curl -LO https://github.com/Caojianfa/zellij-fork/raw/claude/osc-notification-passthrough-WMI63/releases/SHA256SUMS
+shasum -a 256 -c SHA256SUMS  # macOS
+sha256sum -c SHA256SUMS       # Linux
 ```
 
-应该看到：
-```
-zellij-osc-9-777-linux-x86_64-musl.tar.gz: OK
-```
-
-> 如果你解压前先校验，会少一行 `zellij-osc-9-777-linux-x86_64-musl: OK`，那是预期的（解压后的二进制还没出现）。
-
-## 解压 + 安装
-
-```bash
-tar xzf zellij-osc-9-777-linux-x86_64-musl.tar.gz
-chmod +x zellij-osc-9-777-linux-x86_64-musl
-mv zellij-osc-9-777-linux-x86_64-musl /usr/local/bin/zellij-osc-test  # 或者放到任何 PATH 上的目录
-```
-
-> 注意：建议改名为 `zellij-osc-test` 之类，避免覆盖你系统里已有的 `zellij`。这样验证完直接 `rm /usr/local/bin/zellij-osc-test` 就清干净了。
-
-## 启动
-
-```bash
-zellij-osc-test
-```
-
-或者不加到 PATH：
-
-```bash
-./zellij-osc-9-777-linux-x86_64-musl
-```
+应该全部 `OK`。
 
 ## 验证步骤
 
-打开 [`../VERIFY.md`](../VERIFY.md)，照里面 9 个场景跑就行。
+照仓库根目录的 [`VERIFY.md`](https://github.com/Caojianfa/zellij-fork/blob/claude/osc-notification-passthrough-WMI63/VERIFY.md) 跑 9 个场景。最关键的就 3 个：
 
-## 卸载
+1. **OSC 9 默认透传**：进入 zellij 后 `sleep 3; printf '\e]9;test from zellij\a'` → 弹通知 + pane 边框闪烁
+2. **OSC 777 带标题**：`sleep 3; printf '\e]777;notify;Build Done;All tests passed\a'` → 弹带标题的通知
+3. **关闭 passthrough**：在 `~/.config/zellij/config.kdl` 加一行 `allow_osc_passthrough false`，重启 zellij 再跑 OSC 9，应该**只有视觉指示，没有系统通知**
+
+## 完全卸载
 
 ```bash
-rm /usr/local/bin/zellij-osc-test  # 或者你放二进制的位置
-rm zellij-osc-9-777-linux-x86_64-musl.tar.gz SHA256SUMS
-```
+# 如果用了 Homebrew
+brew uninstall zellij
+brew install zellij  # 装回官方版本
 
-如果之前为了验证修改过 `~/.config/zellij/config.kdl`（添加了 `allow_osc_passthrough false`），记得改回来或删除。
+# 删除测试时加的 KDL 配置（如果加过）
+$EDITOR ~/.config/zellij/config.kdl
+# 删掉 allow_osc_passthrough false 那行
+
+# 直接下载方案下，删除二进制
+rm zellij-osc-9-777-* SHA256SUMS
+```
