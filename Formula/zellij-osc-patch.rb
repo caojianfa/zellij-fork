@@ -1,4 +1,4 @@
-class Zellij < Formula
+class ZellijOscPatch < Formula
   desc "Patched zellij with OSC 9 / OSC 777 desktop notification passthrough"
   homepage "https://github.com/Caojianfa/zellij-fork"
   version "0.45.0-osc-9-777"
