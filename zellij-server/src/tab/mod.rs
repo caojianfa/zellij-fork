@@ -227,6 +227,11 @@ pub(crate) struct Tab {
     pub tab_has_pending_bell: bool,
     pub tab_bell_flash: bool, // currently in mid-notification-flash
     pub tab_bell_ring: bool,  // need to send ANSI BEL to the controlling terminal
+    /// Forward OSC 9 / OSC 777 desktop-notification sequences to the host
+    /// terminal. When false, the visual indicator still fires but the OSC
+    /// bytes are dropped at `forward_desktop_notifications`. Does not
+    /// affect OSC 99 (its passthrough is unconditional).
+    pub allow_osc_passthrough: bool,
 }
 
 // FIXME: Use a struct that has a pane_type enum, to reduce all of the duplication
@@ -761,6 +766,7 @@ impl Tab {
         mouse_hover_effects: bool,
         focus_follows_mouse: bool,
         mouse_click_through: bool,
+        allow_osc_passthrough: bool,
         web_server_ip: IpAddr,
         web_server_port: u16,
     ) -> Self {
@@ -879,6 +885,7 @@ impl Tab {
             tab_has_pending_bell: false,
             tab_bell_flash: false,
             tab_bell_ring: false,
+            allow_osc_passthrough,
         }
     }
 
@@ -4831,8 +4838,36 @@ impl Tab {
         };
         output.add_clients(&all_clients, self.link_handler.clone(), None);
         for (payload, terminator) in notifications {
-            // Apply identifier namespacing (Phase 3)
-            // The first semicolon-delimited part of payload is the metadata
+            // Disambiguate OSC code by payload prefix:
+            //   OSC 9   → payload starts with "9;"   (no namespacing — unidirectional)
+            //   OSC 777 → payload starts with "777;" (no namespacing — unidirectional)
+            //   OSC 99  → metadata-prefixed payload (always namespaced)
+            //
+            // Legitimate OSC 99 metadata is `key=value:key=value`, so the
+            // first semicolon-delimited segment always contains `=` or `:` and
+            // can never collide with the literal "9" / "777" prefix used by
+            // OSC 9 / 777 entries.
+            let is_osc9 = payload.starts_with("9;");
+            let is_osc777 = payload.starts_with("777;");
+
+            if is_osc9 || is_osc777 {
+                // Honor user opt-out: drop the OSC bytes but leave the visual
+                // bell alone (it has already been triggered at OSC dispatch
+                // time inside `Grid::osc_dispatch`).
+                if !self.allow_osc_passthrough {
+                    continue;
+                }
+                // Forward as-is, no namespacing, no metadata rewriting.
+                let raw = format!("\x1b]{}{}", payload, terminator);
+                output.add_post_vte_instruction_to_multiple_clients(
+                    all_clients.iter().copied(),
+                    &raw,
+                );
+                continue;
+            }
+
+            // OSC 99 path — apply identifier namespacing.
+            // The first semicolon-delimited part of payload is the metadata.
             let (metadata, rest) = match payload.find(';') {
                 Some(idx) => (
                     payload.get(..idx).unwrap_or_default(),
@@ -5732,6 +5767,9 @@ impl Tab {
     }
     pub fn update_mouse_click_through(&mut self, mouse_click_through: bool) {
         self.mouse_click_through = mouse_click_through;
+    }
+    pub fn update_allow_osc_passthrough(&mut self, allow_osc_passthrough: bool) {
+        self.allow_osc_passthrough = allow_osc_passthrough;
     }
     pub fn clear_mouse_hover_state(&mut self) {
         self.mouse_hover_pane_id.clear();
