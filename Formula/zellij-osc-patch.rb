@@ -12,17 +12,17 @@ class ZellijOscPatch < Formula
   on_macos do
     on_arm do
       url "#{base_url}/zellij-osc-9-777-macos-aarch64-apple-silicon.tar.gz"
-      sha256 "14b7ec4a0eff3baaa20ec10b9231f0b0a9b5afc245e85fbaf24dca05fa6e0d2e"
+      sha256 "8ca58073746fe3f5b8b5cdaf34db084cfeb0ba7d91b83043eb8ce0ba620aadca"
     end
     on_intel do
       url "#{base_url}/zellij-osc-9-777-macos-x86_64-intel.tar.gz"
-      sha256 "1a084d13553b9bf9dbea7905a21c176150d73c80d9de3fb7dc076aff78e63c60"
+      sha256 "d95670f8521de89a069451f4e79b438db838c1812c1123025864fa1507ba4282"
     end
   end
 
   on_linux do
     url "#{base_url}/zellij-osc-9-777-linux-x86_64-musl.tar.gz"
-    sha256 "22cf1275a7952754cde1c5b469f8a6773839fd028807013d361e53067efd609c"
+    sha256 "e8e402a2332a0106447838aae2665822ff05f260dbd37d5c2cd527d292feb9e2"
   end
 
   def install
