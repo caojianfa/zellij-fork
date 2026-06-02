@@ -14906,8 +14906,12 @@ fn osc9_grid_parses_and_stores_notification() {
     assert_eq!(payload, "9;Build complete", "Payload prefixed with '9;'");
     assert_eq!(terminator, "\x07", "BEL terminator preserved");
     assert!(
-        grid.ring_bell,
-        "OSC 9 must trigger ring_bell for visual indicator"
+        grid.pending_visual_bell,
+        "OSC 9 must set pending_visual_bell for the in-Zellij indicator",
+    );
+    assert!(
+        !grid.ring_bell,
+        "OSC 9 must NOT set ring_bell — that would forward `\\u{{7}}` to the host",
     );
 }
 
@@ -14924,7 +14928,11 @@ fn osc9_grid_st_terminator_preserved() {
     let (payload, terminator) = grid.pending_desktop_notifications.first().unwrap();
     assert_eq!(payload, "9;hello");
     assert_eq!(terminator, "\x1b\\", "ST terminator preserved");
-    assert!(grid.ring_bell);
+    assert!(grid.pending_visual_bell);
+    assert!(
+        !grid.ring_bell,
+        "ST-terminated OSC 9 has no BEL byte in input, must not synthesize one",
+    );
 }
 
 #[test]
@@ -14940,7 +14948,11 @@ fn osc9_empty_body_triggers_bell_but_no_push() {
         grid.pending_desktop_notifications.is_empty(),
         "Empty OSC 9 body should not enqueue"
     );
-    assert!(grid.ring_bell, "Empty OSC 9 still rings the bell");
+    assert!(
+        grid.pending_visual_bell,
+        "Empty OSC 9 still triggers the visual indicator",
+    );
+    assert!(!grid.ring_bell);
 }
 
 #[test]
@@ -14960,13 +14972,14 @@ fn osc777_grid_parses_and_stores_notification() {
     let (payload, terminator) = grid.pending_desktop_notifications.first().unwrap();
     assert_eq!(payload, "777;notify;Build Done;Tests passed");
     assert_eq!(terminator, "\x07");
-    assert!(grid.ring_bell);
+    assert!(grid.pending_visual_bell);
+    assert!(!grid.ring_bell);
 }
 
 #[test]
 fn osc777_unknown_subcommand_ignored() {
-    // OSC 777 sub-commands other than `notify` are not in scope; queue should stay empty.
-    // (Visual indicator also stays off — ring_bell only fires on `notify`.)
+    // OSC 777 sub-commands other than `notify` are not in scope; queue should stay empty
+    // and neither bell flag should fire.
     let mut grid = build_test_grid();
     let mut vte_parser = vte::Parser::new();
     for &byte in b"\x1b]777;Beep\x07" {
@@ -14978,9 +14991,10 @@ fn osc777_unknown_subcommand_ignored() {
         "Non-notify OSC 777 sub-commands must not enqueue"
     );
     assert!(
-        !grid.ring_bell,
-        "Non-notify OSC 777 should not fire visual indicator either"
+        !grid.pending_visual_bell,
+        "Non-notify OSC 777 should not fire the visual indicator either",
     );
+    assert!(!grid.ring_bell);
 }
 
 #[test]
@@ -15051,8 +15065,14 @@ fn osc777_forwarded_through_tab_without_namespacing() {
 #[test]
 fn osc9_passthrough_disabled_drops_bytes_but_keeps_visual_bell() {
     // With allow_osc_passthrough=false the OSC bytes should NOT appear in
-    // forwarded output, but the visual-indicator pipeline should still
-    // observe a bell signal once Screen drives the render tick.
+    // forwarded output, AND the visual-indicator pipeline should fire
+    // through the `pending_visual_bell` path (NOT the `ring_bell`
+    // audio-bell path, which would forward `\u{7}` to the host).
+    //
+    // This is a regression test for the audio-bell side-effect originally
+    // flagged in zellij-org/zellij#5166 review (yamam): OSC 9 / OSC 777
+    // are unidirectional desktop notifications, so synthesising an ANSI
+    // BEL on top would be a double-notification.
     let size = Size { cols: 80, rows: 24 };
     let (mut tab, server_receiver) = create_new_tab_with_server_receiver(size, ModeInfo::default());
     tab.update_allow_osc_passthrough(false);
@@ -15060,13 +15080,19 @@ fn osc9_passthrough_disabled_drops_bytes_but_keeps_visual_bell() {
     tab.handle_pty_bytes(1, Vec::from("\x1b]9;should be dropped\x07"))
         .unwrap();
 
-    // Drive the bell pipeline the way `Screen::render` does. The is_active_tab
-    // flag is irrelevant for `tab_bell_ring`, which is set whenever any pane
-    // had a pending bell.
-    let _ = tab.check_and_handle_bell_notifications(true);
+    // Drive the bell pipeline the way `Screen::render` does. The visual
+    // pipeline must record an event, but `had_audio_bell` and
+    // `tab_bell_ring` must both stay false because the desktop
+    // notification IS the alert.
+    let (_new_panes, _tab_newly_set, had_audio_bell) =
+        tab.check_and_handle_bell_notifications(true);
     assert!(
-        tab.tab_bell_ring,
-        "Visual-bell pipeline must observe the OSC 9 bell even when passthrough is off"
+        !had_audio_bell,
+        "OSC 9 must not produce an audio bell (no `\\u{{7}}` forwarding to host)",
+    );
+    assert!(
+        !tab.tab_bell_ring,
+        "tab_bell_ring must stay false for OSC 9 / 777 — it's the visual indicator, not the host bell",
     );
 
     let output = collect_render_output(&server_receiver);
@@ -15074,6 +15100,77 @@ fn osc9_passthrough_disabled_drops_bytes_but_keeps_visual_bell() {
         !output.contains("\x1b]9;"),
         "OSC 9 bytes must not be forwarded when passthrough is off, got: {:?}",
         output
+    );
+}
+
+#[test]
+fn osc9_does_not_synthesize_audio_bell_on_host() {
+    // Even with default (passthrough on) config, OSC 9 must not cause an
+    // ANSI BEL to be forwarded to the host terminal — the desktop
+    // notification itself is the alert, and an extra audio bell would
+    // also be wrong for ST-terminated OSC 9 which has no BEL in input.
+    let size = Size { cols: 80, rows: 24 };
+    let (mut tab, _server_receiver) =
+        create_new_tab_with_server_receiver(size, ModeInfo::default());
+
+    tab.handle_pty_bytes(1, Vec::from("\x1b]9;build done\x07"))
+        .unwrap();
+    let (_new_panes, _tab_newly_set, had_audio_bell) =
+        tab.check_and_handle_bell_notifications(true);
+    assert!(
+        !had_audio_bell,
+        "BEL-terminated OSC 9 must not trigger audio-bell forwarding to host",
+    );
+
+    // ST-terminated form — even more obvious: there's no BEL byte in the
+    // input at all, so synthesizing one would be a clear bug.
+    tab.handle_pty_bytes(1, Vec::from("\x1b]9;build done\x1b\\"))
+        .unwrap();
+    let (_new_panes, _tab_newly_set, had_audio_bell) =
+        tab.check_and_handle_bell_notifications(true);
+    assert!(
+        !had_audio_bell,
+        "ST-terminated OSC 9 must not synthesize an audio BEL out of thin air",
+    );
+}
+
+#[test]
+fn osc777_does_not_synthesize_audio_bell_on_host() {
+    let size = Size { cols: 80, rows: 24 };
+    let (mut tab, _server_receiver) =
+        create_new_tab_with_server_receiver(size, ModeInfo::default());
+
+    tab.handle_pty_bytes(1, Vec::from("\x1b]777;notify;Build Done;Tests passed\x07"))
+        .unwrap();
+    let (_new_panes, _tab_newly_set, had_audio_bell) =
+        tab.check_and_handle_bell_notifications(true);
+    assert!(
+        !had_audio_bell,
+        "OSC 777 notify must not trigger audio-bell forwarding to host",
+    );
+}
+
+#[test]
+fn real_bel_byte_still_triggers_audio_bell() {
+    // Sanity check: the visual-only path for OSC 9 / 777 must NOT
+    // accidentally regress the existing behavior for a literal BEL byte
+    // (0x07) coming through the pane's PTY. A real BEL should still set
+    // `had_audio_bell` / `tab_bell_ring` so the host's audible bell can
+    // ring.
+    let size = Size { cols: 80, rows: 24 };
+    let (mut tab, _server_receiver) =
+        create_new_tab_with_server_receiver(size, ModeInfo::default());
+
+    tab.handle_pty_bytes(1, vec![0x07_u8]).unwrap();
+    let (_new_panes, _tab_newly_set, had_audio_bell) =
+        tab.check_and_handle_bell_notifications(true);
+    assert!(
+        had_audio_bell,
+        "A literal BEL byte must still trigger audio-bell forwarding to host",
+    );
+    assert!(
+        tab.tab_bell_ring,
+        "tab_bell_ring must still fire for a literal BEL byte",
     );
 }
 

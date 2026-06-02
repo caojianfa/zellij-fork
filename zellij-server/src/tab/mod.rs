@@ -610,6 +610,14 @@ pub trait Pane {
     fn get_bell_notification(&self) -> bool {
         false
     }
+    /// Visual-only bell pending: set by OSC 9 / OSC 777 dispatch on the
+    /// underlying Grid. Distinct from `has_bell` (real ANSI BEL byte) so
+    /// the Tab visual pipeline can fire pane/tab indicators without
+    /// forwarding an `\u{7}` to the host terminal.
+    fn has_pending_visual_bell(&self) -> bool {
+        false
+    }
+    fn consume_pending_visual_bell(&mut self) {}
     fn add_red_pane_frame_color_override(&mut self, _error_text: Option<String>);
     fn add_highlight_pane_frame_color_override(
         &mut self,
@@ -2555,12 +2563,32 @@ impl Tab {
             None
         }
     }
+    /// Drive the visual-indicator pipeline (pane frame flash, tab `[!]`,
+    /// folded stacked-pane indicator) for any pane that has signalled a
+    /// pending bell since the last render tick.
+    ///
+    /// Two flavours of pending bell:
+    ///   * `has_bell()` — a real ANSI BEL byte (0x07) was processed by the
+    ///     pane's parser. Sets `tab_bell_ring`, which the Screen-level
+    ///     render loop translates into an `\u{7}` byte forwarded to the
+    ///     host terminal (so the host can ring its audible bell).
+    ///   * `has_pending_visual_bell()` — set by OSC 9 / OSC 777 dispatch.
+    ///     The desktop notification IS the alert; we only want the in-
+    ///     Zellij visual cue, NOT a second audible bell on the host. So
+    ///     visual-only panes drive `panes_with_pending_bell` and
+    ///     `tab_has_pending_bell` but explicitly do not set
+    ///     `tab_bell_ring`.
+    ///
+    /// Returns `(newly_notified_panes, tab_bell_newly_set, had_audio_bell)`
+    /// where `had_audio_bell` flags whether the caller should forward an
+    /// ANSI BEL to the host terminal on this render tick.
     pub fn check_and_handle_bell_notifications(
         &mut self,
         is_active_tab: bool,
-    ) -> (Vec<PaneId>, bool) {
+    ) -> (Vec<PaneId>, bool, bool) {
         let mut newly_notified_panes = vec![];
         let mut tab_bell_newly_set = false;
+        let mut had_audio_bell = false;
 
         let focused_pane_ids: HashSet<PaneId> = self
             .connected_clients
@@ -2569,7 +2597,7 @@ impl Tab {
             .filter_map(|c_id| self.get_active_pane_id(*c_id))
             .collect();
 
-        // Collect ringing pane IDs first (immutable borrow)
+        // Collect audio-bell pane IDs first (immutable borrow)
         let ringing_panes: Vec<PaneId> = self
             .tiled_panes
             .get_panes()
@@ -2583,6 +2611,7 @@ impl Tab {
             if let Some(pane) = self.get_pane_with_id_mut(pane_id) {
                 pane.consume_bell();
             }
+            had_audio_bell = true;
             let is_focused = focused_pane_ids.contains(&pane_id);
             if !is_focused && !self.panes_with_pending_bell.contains(&pane_id) {
                 if let Some(pane) = self.get_pane_with_id_mut(pane_id) {
@@ -2599,7 +2628,37 @@ impl Tab {
                 self.tab_has_pending_bell = true;
             }
         }
-        (newly_notified_panes, tab_bell_newly_set)
+
+        // Visual-only pending bells (OSC 9 / OSC 777): drive the same
+        // visual indicator state as a real bell, but do NOT touch
+        // `tab_bell_ring` or `had_audio_bell` — those are what cause an
+        // ANSI BEL to be forwarded to the host.
+        let visual_only_panes: Vec<PaneId> = self
+            .tiled_panes
+            .get_panes()
+            .chain(self.floating_panes.get_panes())
+            .filter(|(_, pane)| pane.has_pending_visual_bell())
+            .map(|(pane_id, _)| *pane_id)
+            .collect();
+
+        for pane_id in visual_only_panes {
+            if let Some(pane) = self.get_pane_with_id_mut(pane_id) {
+                pane.consume_pending_visual_bell();
+            }
+            let is_focused = focused_pane_ids.contains(&pane_id);
+            if !is_focused && !self.panes_with_pending_bell.contains(&pane_id) {
+                if let Some(pane) = self.get_pane_with_id_mut(pane_id) {
+                    pane.set_bell_notification(true);
+                }
+                self.panes_with_pending_bell.insert(pane_id);
+                newly_notified_panes.push(pane_id);
+            }
+            if !is_active_tab {
+                self.tab_has_pending_bell = true;
+            }
+        }
+
+        (newly_notified_panes, tab_bell_newly_set, had_audio_bell)
     }
     pub fn clear_bell_notification_for_pane(&mut self, pane_id: PaneId) {
         self.panes_with_pending_bell.remove(&pane_id);
@@ -2630,6 +2689,21 @@ impl Tab {
         for pane_id in ringing_panes {
             if let Some(pane) = self.get_pane_with_id_mut(pane_id) {
                 pane.consume_bell();
+            }
+        }
+        // Visual-only pending bells (OSC 9 / OSC 777) are consumed but
+        // never forwarded as audible BEL — that is the whole point of
+        // tracking them separately from `ring_bell`.
+        let visual_only_panes: Vec<PaneId> = self
+            .tiled_panes
+            .get_panes()
+            .chain(self.floating_panes.get_panes())
+            .filter(|(_, pane)| pane.has_pending_visual_bell())
+            .map(|(pane_id, _)| *pane_id)
+            .collect();
+        for pane_id in visual_only_panes {
+            if let Some(pane) = self.get_pane_with_id_mut(pane_id) {
+                pane.consume_pending_visual_bell();
             }
         }
         had_bell

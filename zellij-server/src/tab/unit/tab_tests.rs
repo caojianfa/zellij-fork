@@ -15612,7 +15612,8 @@ pub fn bell_in_unfocused_pane_sets_notification() {
     tab.handle_pty_bytes(2, vec![7u8]).unwrap();
 
     // Now call check_and_handle_bell_notifications as non-active tab
-    let (new_panes, tab_newly_set) = tab.check_and_handle_bell_notifications(false);
+    let (new_panes, tab_newly_set, _had_audio_bell) =
+        tab.check_and_handle_bell_notifications(false);
 
     assert!(
         new_panes.contains(&new_pane_id),

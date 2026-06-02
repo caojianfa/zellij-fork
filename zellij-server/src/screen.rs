@@ -2554,7 +2554,7 @@ impl Screen {
 
                 for tab in self.tabs.values_mut() {
                     let is_active = active_tab_ids_snapshot.contains(&tab.id);
-                    let (new_panes, tab_newly_set) =
+                    let (new_panes, tab_newly_set, had_audio_bell) =
                         tab.check_and_handle_bell_notifications(is_active);
                     if !new_panes.is_empty() {
                         panes_to_flash.extend(new_panes);
@@ -2564,9 +2564,16 @@ impl Screen {
                         tabs_to_flash.push(tab.id);
                         bell_state_changed = true;
                     }
+                    if had_audio_bell {
+                        has_bell = true;
+                    }
                 }
 
-                has_bell = !panes_to_flash.is_empty() || !tabs_to_flash.is_empty();
+                // `has_bell` here gates ANSI BEL forwarding to the host
+                // terminal. Visual-only signals (OSC 9 / 777 visual
+                // indicators) populate `panes_to_flash` / `tabs_to_flash`
+                // but must NOT cause us to forward `\u{7}` — those are
+                // already handled by the desktop notification itself.
                 if !panes_to_flash.is_empty() {
                     let _ = self
                         .bus
